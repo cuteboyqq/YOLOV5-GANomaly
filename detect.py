@@ -144,10 +144,12 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
         w_enc=1,
         extralayers=0,
         encdims=None,
-        dataset=r'/home/ali/GitHub_Code/YOLO/YOLOV5/runs/detect/f_384_2min/crops_1cls',
+        dataset=r'/home/ali/GitHub_Code/YOLO/YOLOV5-old/runs/detect/f_384_2min/crops_1cls',
         batch_size=64,
         lr=2e-4,
         beta1=0.5,
+        GANOMALY=False, #use GANoamly defeat detection
+        LOSS=1.2,
 ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
@@ -176,11 +178,10 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
     #==========================
     
     #opt_tf = FLAGS
-    defeat_detection = True
-    if defeat_detection:
+    if GANOMALY:
         ganomaly = GANomaly(opt,
-                            train_dataset=r'/home/ali/GitHub_Code/YOLO/YOLOV5-old/runs/detect/f_384_2min/crops_1cls',
-                            valid_dataset=r'/home/ali/GitHub_Code/YOLO/YOLOV5-old/runs/detect/f_384_2min/crops_1cls',
+                            train_dataset=opt.dataset,
+                            valid_dataset=opt.dataset,
                             test_dataset=None)
     
     
@@ -259,16 +260,20 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
 
                     if save_img or save_crop or view_img:  # Add bbox to image
                         c = int(cls)  # integer class
-                        if not c==0 and not c==1:
+                        if GANOMALY:
+                            if not c==0 and not c==1:
+                                label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                                annotator.box_label(xyxy, label, color=colors(c, True))
+                        else:
                             label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
                             annotator.box_label(xyxy, label, color=colors(c, True))
                     if save_crop:
                         save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
                     
-                    #=============
+                    #==================================
                     # GANomaly Alister 2022-10-13 add
-                    #=============
-                    if defeat_detection:
+                    #==================================
+                    if GANOMALY:
                         abnormal = 0
                         crop = get_crop_image(xyxy, imc, BGR=True)
                         
@@ -284,8 +289,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
                         loss = ganomaly.infer_cropimage(crop)
                         loss = int(loss*100)
                         loss = float(loss/100.0)
-                        print(loss)
-                        if loss<=1:
+                        #print(loss)
+                        if loss<=LOSS:
                             print('normal-normal-normal-normal-normal-normal-normal {}-- {}'.format(loss,loss))
                         else:
                             print('ab-normal line--ab-normal line--ab-normal line--ab-normal line {}--{}'.format(loss,loss))
@@ -293,7 +298,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
                         if save_img or save_crop or view_img:  # Add bbox to image
                             c = int(cls)  # integer class
                             if c==0 or c==1:
-                                if loss<=1.2:
+                                if loss<=LOSS:
                                     annotator.box_label(xyxy, "normal "+str(loss), color=(255,0,0))
                                 else:
                                     annotator.box_label(xyxy, "abnormal "+str(loss), color=(0,255,255))
@@ -386,7 +391,8 @@ def parse_opt():
     parser.add_argument('--batch_size', type=int, default=64, help='GANomaly batch size')
     parser.add_argument('--lr', type=float, default=2e-4, help='GANomaly learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='GANomaly beta1 for Adam optimizer')
-    
+    parser.add_argument('--GANOMALY', action='store_true', help='enable GANomaly')
+    parser.add_argument('--LOSS', type=float, default=1.2, help='GANomaly generator loss threshold')
     #========================================================================================
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
