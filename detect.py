@@ -149,7 +149,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
         lr=2e-4,
         beta1=0.5,
         GANOMALY=False, #use GANoamly defeat detection
-        LOSS=1.2,
+        LOSS=4,
 ):
     source = str(source)
     save_img = not nosave and not source.endswith('.txt')  # save inference images
@@ -183,7 +183,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
                             train_dataset=opt.dataset,
                             valid_dataset=opt.dataset,
                             test_dataset=None)
-    
+        w=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model/G-uint8-new.tflite'
+        interpreter = ganomaly.load_model_tflite(w, tflite=True, edgetpu=False)
     
     
     # Dataloader
@@ -199,11 +200,22 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
         dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
         print('LoadImages successful')
     vid_path, vid_writer = [None] * bs, [None] * bs
-
+    
+    
+    #==========Alister add 2022-10-28==============================================
+    save_path = 'runs/detect/Raw_Stream.mp4'  # force *.mp4 suffix on results videos
+    fps, w, h = 30, 1280, 720
+    raw_stream = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h))
+    
+    #=============================================================================
+    
     # Run inference
     model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
     seen, windows, dt = 0, [], (Profile(), Profile(), Profile())
     for path, im, im0s, vid_cap, s in dataset:
+        #==========Alister add 2022-10-28==============================================
+        raw_stream.write(im0s)
+        #==========Alister add 2022-10-28==============================================
         with dt[0]:
             im = torch.from_numpy(im).to(model.device)
             im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
@@ -277,7 +289,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
                         abnormal = 0
                         crop = get_crop_image(xyxy, imc, BGR=True)
                         
-                        crop = cv2.resize(crop,(32,32),interpolation=cv2.INTER_AREA)
+                        crop = cv2.resize(crop,(isize,isize),interpolation=cv2.INTER_AREA)
                         #crop = crop / 255.0
                         crop = np.expand_dims(crop, axis=0)
                         print(crop.shape)
@@ -286,7 +298,9 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
                         #cuda = True if torch.cuda.is_available() else False
                         #Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
                         #crop = Variable(crop.type(Tensor))
-                        loss = ganomaly.infer_cropimage(crop)
+                        #loss = ganomaly.infer_cropimage(crop)
+                        w=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model/G-uint8-new.tflite'
+                        loss, gen_img = ganomaly.infer_cropimage_tflite(crop, w, interpreter, tflite=True, edgetpu=False)
                         loss = int(loss*100)
                         loss = float(loss/100.0)
                         #print(loss)
@@ -387,12 +401,12 @@ def parse_opt():
     parser.add_argument('--w_enc', type=int, default=1, help='GANomaly Encoder loss weight')
     parser.add_argument('--extralayers', type=int, default=0, help='GANomaly extralayers for both G and D')
     parser.add_argument('--encdims', type=str, default=None, help='GANomaly Layer dimensions of the encoder and in reverse of the decoder.')
-    parser.add_argument('--dataset', type=str, default=r'/home/ali/GitHub_Code/YOLO/YOLOV5/runs/detect/f_384_2min/crops_1cls', help='dataset dir')
+    parser.add_argument('--dataset', type=str, default=r'/home/ali/GitHub_Code/YOLO/YOLOV5-old/runs/detect/f_384_2min/crops_1cls', help='dataset dir')
     parser.add_argument('--batch_size', type=int, default=64, help='GANomaly batch size')
     parser.add_argument('--lr', type=float, default=2e-4, help='GANomaly learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='GANomaly beta1 for Adam optimizer')
     parser.add_argument('--GANOMALY', action='store_true', help='enable GANomaly')
-    parser.add_argument('--LOSS', type=float, default=1.2, help='GANomaly generator loss threshold')
+    parser.add_argument('--LOSS', type=float, default=4.0, help='GANomaly generator loss threshold')
     #========================================================================================
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
