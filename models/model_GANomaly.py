@@ -475,7 +475,130 @@ class GANomaly(GANRunner):
         g_loss = self.g_loss()
       
         return g_loss
-        
+    
+    def load_model_tflite(self, w, tflite=True, edgetpu=False):
+        if tflite or edgetpu:# https://www.tensorflow.org/lite/guide/python#install_tensorflow_lite_for_python
+            try:  # https://coral.ai/docs/edgetpu/tflite-python/#update-existing-tf-lite-code-for-the-edge-tpu
+                from tflite_runtime.interpreter import Interpreter, load_delegate
+                #print('try successful')
+            except ImportError:
+                #print('ImportError')
+                import tensorflow as tf
+                Interpreter, load_delegate = tf.lite.Interpreter, tf.lite.experimental.load_delegate,
+            if edgetpu:  # TF Edge TPU https://coral.ai/software/#edgetpu-runtime
+                #print(f'Loading {w} for TensorFlow Lite Edge TPU inference...')
+                delegate = {
+                    'Linux': 'libedgetpu.so.1',
+                    'Darwin': 'libedgetpu.1.dylib',
+                    'Windows': 'edgetpu.dll'}[platform.system()]
+                interpreter = Interpreter(model_path=w, experimental_delegates=[load_delegate(delegate)])
+            else:  # TFLite
+                #print(f'Loading {w} for TensorFlow Lite inference...')
+                interpreter = Interpreter(model_path=w)  # load TFLite model
+        return interpreter
+    def infer_cropimage_tflite(self, im, w, interpreter, tflite=True, edgetpu=False):
+        if tflite or edgetpu:# https://www.tensorflow.org/lite/guide/python#install_tensorflow_lite_for_python
+            '''
+            try:  # https://coral.ai/docs/edgetpu/tflite-python/#update-existing-tf-lite-code-for-the-edge-tpu
+                from tflite_runtime.interpreter import Interpreter, load_delegate
+                #print('try successful')
+            except ImportError:
+                #print('ImportError')
+                import tensorflow as tf
+                Interpreter, load_delegate = tf.lite.Interpreter, tf.lite.experimental.load_delegate,
+            if edgetpu:  # TF Edge TPU https://coral.ai/software/#edgetpu-runtime
+                #print(f'Loading {w} for TensorFlow Lite Edge TPU inference...')
+                delegate = {
+                    'Linux': 'libedgetpu.so.1',
+                    'Darwin': 'libedgetpu.1.dylib',
+                    'Windows': 'edgetpu.dll'}[platform.system()]
+                interpreter = Interpreter(model_path=w, experimental_delegates=[load_delegate(delegate)])
+            else:  # TFLite
+                #print(f'Loading {w} for TensorFlow Lite inference...')
+                interpreter = Interpreter(model_path=w)  # load TFLite model
+            '''
+            interpreter.allocate_tensors()  # allocate
+            input_details = interpreter.get_input_details()  # inputs
+            output_details = interpreter.get_output_details()  # outputs 
+            #print('input details : \n{}'.format(input_details))
+            #print('output details : \n{}'.format(output_details))
+            
+            import tensorflow as tf
+            from PIL import Image
+            from matplotlib import pyplot as plt
+            # Lite or Edge TPU
+            #plt.imshow(np.transpose(im[0].numpy(), (1, 2, 0)))
+            #print('input image im : {}'.format(im))
+            #im = im.numpy()
+            #im = cv2.imread(im)
+            #im = cv2.resize(im, (32, 32))
+            self.input = im
+            im = tf.transpose(im, perm=[0,1,2,3])
+            im = tf.squeeze(im)
+            #plt.imshow(im)
+            #plt.show()
+            #cv2.imshow('ori_image',im.numpy())
+            #cv2.imwrite('ori_image.jpg',im)
+            #cv2.waitKey(10)
+            im = tf.expand_dims(im, axis=0)
+            im = im.cpu().numpy()
+            
+            #print('im:{}'.format(im.shape))
+            #print('im: {}'.format(im))
+            input = input_details[0]
+            int8 = input['dtype'] == np.uint8  # is TFLite quantized uint8 model (np.uint8)
+            #int32 = input['dtype'] == np.int32  # is TFLite quantized uint8 model (np.uint8)
+            #print('input[dtype] : {}'.format(input['dtype']))
+            if int8:
+                #print('is TFLite quantized uint8 model')
+                scale, zero_point = input['quantization']
+                im = (im / scale + zero_point).astype(np.uint8)  # de-scale
+                #print('after de-scale {}'.format(im))
+            interpreter.set_tensor(input['index'], im)
+            interpreter.invoke()
+            y = []
+            self.gen_img = None
+            for output in output_details:
+                x = interpreter.get_tensor(output['index'])
+                #print(x.shape)
+                #print(x)
+                if x.shape[1]==32:
+                    #print('get out images')
+                    
+                    scale, zero_point = output['quantization']
+                    
+                    x = (x.astype(np.float32)-zero_point) * scale  # re-scale
+                    #x = x.astype(np.float32)
+                    x = tf.squeeze(x)
+                    x = x.numpy()
+                    self.gen_img = x
+                    #print('after squeeze & numpy x : {}'.format(x))
+                    #cv2.imshow('out_image',gen_img)
+                    #cv2.imwrite('out_image.jpg',gen_img)
+                    #cv2.waitKey(10)
+                    #gen_img = renormalize(gen_img)
+                    self.gen_img = tf.transpose(self.gen_img, perm=[0,1,2])
+                    #plt.imshow(gen_img)
+                    #plt.show()
+                if int8:
+                    scale, zero_point = output['quantization']
+                    x = (x.astype(np.float32)-zero_point) * scale  # re-scale
+                    #gen_img = tf.squeeze(gen_img)
+                    #gen_img = gen_img.numpy()
+                y.append(x)
+            y = [x if isinstance(x, np.ndarray) else x.numpy() for x in y]
+            #gen_img = y[0]
+            #print('input image : {}'.format(input_img))
+            #print('input image : {}'.format(input_img.shape))
+            #print('gen_img : {}'.format(gen_img))
+            #print('gen_img : {}'.format(gen_img.shape))
+            self.latent_i = y[1]
+            self.latent_o = y[2]
+            _g_loss = self.g_loss_tflite()
+            #print('g_loss : {}'.format(_g_loss))
+            #print(y)
+            return _g_loss, self.gen_img
+    
     def infer(self, test_dataset,SHOW_MAX_NUM,show_img,data_type):
         show_num = 0
         self.load_best()
@@ -639,9 +762,19 @@ class GANomaly(GANRunner):
                 self.err_g_con * self.opt.w_con + \
                 self.err_g_enc * self.opt.w_enc
         return g_loss
+    
+    def g_loss_tflite(self):
+        #self.err_g_adv = self.l_adv(self.feat_real, self.feat_fake)
+        self.err_g_con = self.l_con(self.input, self.gen_img)
+        self.err_g_enc = self.l_enc(self.latent_i, self.latent_o)
+        g_loss =self.err_g_con * self.opt.w_con + \
+                self.err_g_enc * self.opt.w_enc
+                
+        return g_loss
 
     def d_loss(self):
         self.err_d_real = self.l_bce(self.pred_real, self.real_label)
         self.err_d_fake = self.l_bce(self.pred_fake, self.fake_label)
         d_loss = (self.err_d_real + self.err_d_fake) * 0.5
         return d_loss
+    
