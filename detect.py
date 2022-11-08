@@ -46,11 +46,11 @@ from utils.general import (LOGGER, Profile, check_file, check_img_size, check_im
 from utils.plots import Annotator, colors, save_one_box, get_crop_image
 from utils.torch_utils import select_device, smart_inference_mode
 from models.model_GANomaly import *
-
+from models.model_GANomaly_edgetpu import *
 
 #=========================================================================
-import tensorflow as tf
-from tensorflow.keras import layers
+#import tensorflow as tf
+#from tensorflow.keras import layers
 print(tf.__version__)
 import os
 import time
@@ -134,7 +134,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
-        isize=32,
+        isize=64,
         nz=100,
         nc=3,
         ndf=64,
@@ -179,13 +179,21 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
     
     #opt_tf = FLAGS
     if GANOMALY:
+        '''
         ganomaly = GANomaly(opt,
                             train_dataset=opt.dataset,
                             valid_dataset=opt.dataset,
                             test_dataset=None)
-        w=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model/G-uint8-new.tflite'
+        w=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model/G-uint8-20221104.tflite'
         interpreter = ganomaly.load_model_tflite(w, tflite=True, edgetpu=False)
-    
+        '''
+        ganomaly = GANomaly_Detect(model_dir=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model',
+                                    model_file=r'G-uint8-20221104.tflite',
+                                    save_image=False,
+                                    show_log=False,
+                                    tflite=True,
+                                    edgetpu=False)
+        interpreter = ganomaly.get_interpreter()
     
     # Dataloader
     bs = 1  # batch_size
@@ -291,16 +299,21 @@ def run(weights=ROOT / 'yolov5s.pt',  # model path or triton URL
                         
                         crop = cv2.resize(crop,(isize,isize),interpolation=cv2.INTER_AREA)
                         #crop = crop / 255.0
-                        crop = np.expand_dims(crop, axis=0)
+                        #crop = np.expand_dims(crop, axis=0)
                         print(crop.shape)
-                        crop=tf.convert_to_tensor(crop,dtype=tf.float32)
-                        crop=tf.cast(crop/255.0,dtype=tf.float32)
+                        #crop=tf.convert_to_tensor(crop,dtype=tf.float32)
+                        #crop=tf.cast(crop/255.0,dtype=tf.float32)
+                        #===========Remove tensorflow function==================
+                        #crop = crop/255.0
+                        #crop = crop.astype(np.float32)
+                        #===========Remove tensorflow function==================
                         #cuda = True if torch.cuda.is_available() else False
                         #Tensor = torch.cuda.FloatTensor if cuda else torch.FloatTensor
                         #crop = Variable(crop.type(Tensor))
                         #loss = ganomaly.infer_cropimage(crop)
-                        w=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model/G-uint8-new.tflite'
-                        loss, gen_img = ganomaly.infer_cropimage_tflite(crop, w, interpreter, tflite=True, edgetpu=False)
+                        w=r'/home/ali/GitHub_Code/cuteboyqq/GANomaly/GANomaly-tf2/export_model/G-uint8-20221104.tflite'
+                        #loss, gen_img = ganomaly.infer_cropimage_tflite(crop, w, interpreter, tflite=True, edgetpu=False)
+                        loss, gen_img = ganomaly.detect_image(w, crop, cnt=1)
                         loss = int(loss*100)
                         loss = float(loss/100.0)
                         #print(loss)
@@ -391,7 +404,7 @@ def parse_opt():
     parser.add_argument('--dnn', action='store_true', help='use OpenCV DNN for ONNX inference')
     parser.add_argument('--vid-stride', type=int, default=1, help='video frame-rate stride')
     #========================================================================================
-    parser.add_argument('--isize', type=int, default=32, help='GANomaly input size')
+    parser.add_argument('--isize', type=int, default=64, help='GANomaly input size')
     parser.add_argument('--nz', type=int, default=100, help='GANomaly latent dim')
     parser.add_argument('--nc', type=int, default=3, help='GANomaly num of channels')
     parser.add_argument('--ndf', type=int, default=64, help='GANomaly number of discriminator filters')
@@ -406,7 +419,7 @@ def parse_opt():
     parser.add_argument('--lr', type=float, default=2e-4, help='GANomaly learning rate')
     parser.add_argument('--beta1', type=float, default=0.5, help='GANomaly beta1 for Adam optimizer')
     parser.add_argument('--GANOMALY', action='store_true', help='enable GANomaly')
-    parser.add_argument('--LOSS', type=float, default=4.0, help='GANomaly generator loss threshold')
+    parser.add_argument('--LOSS', type=float, default=6.0, help='GANomaly generator loss threshold')
     #========================================================================================
     opt = parser.parse_args()
     opt.imgsz *= 2 if len(opt.imgsz) == 1 else 1  # expand
