@@ -16,10 +16,12 @@ import os
 
 import os
 import pathlib
+'''
 from pycoral.utils import edgetpu
 from pycoral.utils import dataset
 from pycoral.adapters import common
 from pycoral.adapters import classify
+'''
 from PIL import Image
 
 
@@ -28,11 +30,13 @@ class GANomaly_Detect():
                  model_dir=r'/home/ali/Desktop/GANomaly-tf2/export_model',
                  model_file=r'G-uint8-20221104_edgetpu.tflite',
                  save_image=False,
-                 show_log=False):
+                 show_log=False,
+                 tflite=False,
+                 edgetpu=True):
         super().__init__()
         self.model_dir = model_dir
-        self.tflite = False
-        self.edgetpu = True
+        self.tflite = tflite
+        self.edgetpu = edgetpu
         self.model_file = model_file
         self.model_path = os.path.join(self.model_dir, model_file)
         self.interpreter = self.get_interpreter()
@@ -74,6 +78,7 @@ class GANomaly_Detect():
         if self.tflite or self.edgetpu:# https://www.tensorflow.org/lite/guide/python#install_tensorflow_lite_for_python
             try:  # https://coral.ai/docs/edgetpu/tflite-python/#update-existing-tf-lite-code-for-the-edge-tpu
                 from tflite_runtime.interpreter import Interpreter, load_delegate
+                self.Interpreter = Interpreter
                 print('try successful')
             except ImportError:
                 print('ImportError')
@@ -132,8 +137,8 @@ class GANomaly_Detect():
             #plt.imshow(im)
             #plt.show()
         elif self.ONLY_DETECT_ONE_IMAGE:
-            im = cv2.imread(im)
-            im = cv2.resize(im, (64, 64))
+            #im = cv2.imread(im)
+            #im = cv2.resize(im, (64, 64))
             #input_img = im
             if self.save_image:
             #cv2.imshow('ori_image',im)
@@ -151,11 +156,12 @@ class GANomaly_Detect():
         #img = img / 255.0
         
         #im = Image.fromarray((im * 255).astype('uint8'))
+        self.input_img = im
         im = im[np.newaxis, ...].astype(np.float32)
         if self.show_log:
             print('im : {}'.format(im.shape))
-        self.input_img = im
-        im = im/255.0
+        
+        #im = im/255.0
         #im = tf.expand_dims(im, axis=0)
         #im = im.numpy()
         
@@ -172,8 +178,8 @@ class GANomaly_Detect():
             #im = im.astype(np.uint8)
             if self.show_log:
                 print('after de-scale {}'.format(im))
-        interpreter.set_tensor(input['index'], im)
-        interpreter.invoke()
+        self.interpreter.set_tensor(input['index'], im)
+        self.interpreter.invoke()
         y = []
         self.gen_img = None
         for output in self.output_details:
@@ -222,14 +228,18 @@ class GANomaly_Detect():
         if self.show_log:
             print('latent_i : {}'.format(self.latent_i))
             print('latent_o : {}'.format(self.latent_o))
-        self._g_loss = self.g_loss(self.input_img/255.0, self.gen_img/255.0, self.latent_i, self.latent_o)
+        self.g_loss_value = self.g_loss()
         #_g_loss = 888
         if self.show_log:
-            print('g_loss : {}'.format(self._g_loss))
+            print('g_loss : {}'.format(self.g_loss_value))
         #print(y)
-        return self._g_loss, self.gen_img
+        return self.g_loss_value, self.gen_img
     
     def g_loss(self):
+        if self.show_log:
+            print('[g_loss]: Start normalize input_img and gen_img')
+        self.input_img = (self.input_img)/255.0
+        self.gen_img = (self.gen_img)/255.0
         
         def l1_loss(A,B):
             return np.mean((abs(A-B)).flatten())
@@ -251,11 +261,14 @@ class GANomaly_Detect():
         
         #err_g_adv = l_adv(feat_real, feat_fake)
         self.err_g_con = self.l_con(self.input_img, self.gen_img)
+       
         #err_g_enc = l_enc(latent_i, latent_o)
         self.err_g_enc = self.l_enc(self.latent_i,self.latent_o)
-        self.g_loss = self.err_g_con * 50 + \
+       
+        g_loss = self.err_g_con * 50 + \
                  self.err_g_enc * 1
-        return self.g_loss
+       
+        return g_loss
     
     def plot_loss_distribution(self, SHOW_MAX_NUM,positive_loss,defeat_loss):
         # Importing packages
